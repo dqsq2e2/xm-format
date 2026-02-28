@@ -1,0 +1,153 @@
+name: Release Plugin
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "Cargo.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      tag_exists: ${{ steps.check_tag.outputs.exists }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Get Version
+        id: get_version
+        run: |
+          VERSION=$(grep '^version =' Cargo.toml | head -n 1 | cut -d '"' -f 2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Detected version: $VERSION"
+
+      - name: Check if Tag Exists
+        id: check_tag
+        uses: mukunku/tag-exists-action@v1.6.0
+        with: 
+          tag: "v${{ steps.get_version.outputs.version }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Output Status
+        run: |
+          echo "Tag v${{ steps.get_version.outputs.version }} exists: ${{ steps.check_tag.outputs.exists }}"
+
+  build:
+    needs: check-version
+    if: needs.check-version.outputs.tag_exists == 'false'
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: xm_format.dll
+            asset_name: xm-format-windows-x86_64.zip
+            entry_point: xm_format.dll
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: libxm_format.so
+            asset_name: xm-format-linux-x86_64.zip
+            entry_point: libxm_format.so
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact_name: libxm_format.so
+            asset_name: xm-format-linux-aarch64.zip
+            entry_point: libxm_format.so
+          - os: macos-13
+            target: x86_64-apple-darwin
+            artifact_name: libxm_format.dylib
+            asset_name: xm-format-macos-x86_64.zip
+            entry_point: libxm_format.dylib
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Cross (for ARM)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: cargo install cross
+
+      - name: Build (Default)
+        if: matrix.target != 'aarch64-unknown-linux-gnu'
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build (Cross)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Prepare Release Artifacts
+        shell: bash
+        run: |
+          mkdir -p release
+          # Copy the built artifact to release folder
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release/
+          
+          # Copy and modify plugin.json
+          cp plugin.json release/
+          
+          # Use jq to update the entry_point and version in plugin.json
+          VERSION="${{ needs.check-version.outputs.version }}"
+          jq --arg entry "${{ matrix.entry_point }}" --arg ver "$VERSION" \
+             '.entry_point = $entry | .version = $ver' \
+             release/plugin.json > release/plugin.json.tmp && mv release/plugin.json.tmp release/plugin.json
+          
+          echo "Content of modified plugin.json:"
+          cat release/plugin.json
+
+      - name: Package Release
+        shell: bash
+        run: |
+          cd release
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            7z a ../${{ matrix.asset_name }} *
+          else
+            zip -r ../${{ matrix.asset_name }} *
+          fi
+          
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+          retention-days: 1
+
+  create-release:
+    needs: [check-version, build]
+    if: needs.check-version.outputs.tag_exists == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Display Downloaded Files
+        run: ls -R artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.check-version.outputs.version }}
+          name: Release v${{ needs.check-version.outputs.version }}
+          files: artifacts/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
