@@ -16,6 +16,11 @@ const XM_KEY: &[u8] = "ximalayaximalayaximalayaximalaya".as_bytes();
 #[cfg(not(target_arch = "wasm32"))]
 const XM_WASM: &[u8] = include_bytes!("xm.wasm");
 
+// Fix for macOS linking error with wasmer: ___rust_probestack symbol missing
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+#[no_mangle]
+pub extern "C" fn ___rust_probestack() {}
+
 /// Extract XM metadata from file
 pub fn extract_xm_info(reader: impl std::io::Read) -> Result<XmInfo> {
     Tag::read_from(reader)
