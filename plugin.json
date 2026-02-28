@@ -1,0 +1,38 @@
+{
+  "name": "xm-format",
+  "version": "1.0.0",
+  "plugin_type": "format",
+  "supported_extensions": ["xm"],
+  "author": "Ting Reader Team",
+  "description": "XM 格式支持插件，支持喜马拉雅xm格式文件",
+  "description_en": "XM format support plugin for Ximalaya xm format files",
+  "license": "MIT",
+  "homepage": "https://github.com/dqsq2e2/xm-format",
+  "entry_point": "xm_format.dll",
+  "dependencies": [],
+  "permissions": [
+    {
+      "type": "file_read",
+      "value": "./data/audio"
+    },
+    {
+      "type": "file_write",
+      "value": "./data/audio"
+    }
+  ],
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "enable_streaming": {
+        "type": "boolean",
+        "default": true,
+        "description": "启用流式解密以减少内存占用"
+      },
+      "buffer_size": {
+        "type": "integer",
+        "default": 8192,
+        "description": "解密缓冲区大小（字节）"
+      }
+    }
+  }
+}
