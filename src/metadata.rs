@@ -45,7 +45,8 @@ impl MetadataExtractor {
     }
 
     fn clean_book_title(title: &str) -> String {
-        if let Some(idx) = title.find('|') {
+        // Support both ASCII pipe and CJK Unified Ideograph separator
+        if let Some(idx) = title.find(|c| c == '|' || c == '丨') {
             title[..idx].trim().to_string()
         } else {
             title.trim().to_string()
