@@ -72,6 +72,17 @@ pub fn decrypt_chunk(xm_info: &XmInfo, encrypted_chunk: &[u8]) -> Result<Vec<u8>
     Ok(decoded_data)
 }
 
+// Global WASM state to avoid recompilation
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Mutex;
+#[cfg(not(target_arch = "wasm32"))]
+use lazy_static::lazy_static;
+
+#[cfg(not(target_arch = "wasm32"))]
+lazy_static! {
+    static ref WASM_MODULE: Mutex<Option<Module>> = Mutex::new(None);
+}
+
 /// Native target implementation using wasmer runtime
 #[cfg(not(target_arch = "wasm32"))]
 fn decrypt_chunk_native(decrypted_str: &str, track_id: &str) -> Result<String> {
@@ -79,8 +90,17 @@ fn decrypt_chunk_native(decrypted_str: &str, track_id: &str) -> Result<String> {
     let compiler = Cranelift::new();
     let mut store = Store::new(compiler);
     
-    let module = Module::from_binary(&store, XM_WASM)
-        .map_err(|e| XmError::WasmError(format!("Failed to load WASM module: {}", e)))?;
+    // Use cached module if available
+    let module = {
+        let mut cache = WASM_MODULE.lock().map_err(|e| XmError::WasmError(format!("Failed to acquire lock: {}", e)))?;
+        if cache.is_none() {
+            let m = Module::from_binary(&store, XM_WASM)
+                .map_err(|e| XmError::WasmError(format!("Failed to load WASM module: {}", e)))?;
+            *cache = Some(m);
+        }
+        cache.as_ref().unwrap().clone()
+    };
+    
     let import_object = imports! {};
     let instance = Instance::new(&mut store, &module, &import_object)
         .map_err(|e| XmError::WasmError(format!("Failed to instantiate WASM: {}", e)))?;
