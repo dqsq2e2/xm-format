@@ -74,35 +74,44 @@ pub fn decrypt_chunk(xm_info: &XmInfo, encrypted_chunk: &[u8]) -> Result<Vec<u8>
 
 // Global WASM state to avoid recompilation
 #[cfg(not(target_arch = "wasm32"))]
-use std::sync::Mutex;
-#[cfg(not(target_arch = "wasm32"))]
 use lazy_static::lazy_static;
 
 #[cfg(not(target_arch = "wasm32"))]
+struct WasmContext {
+    engine: wasmer::Engine,
+    module: Module,
+}
+
+// Make WasmContext thread-safe explicitly since wasmer::Engine and Module are thread-safe
+#[cfg(not(target_arch = "wasm32"))]
+unsafe impl Send for WasmContext {}
+#[cfg(not(target_arch = "wasm32"))]
+unsafe impl Sync for WasmContext {}
+
+#[cfg(not(target_arch = "wasm32"))]
 lazy_static! {
-    static ref WASM_MODULE: Mutex<Option<Module>> = Mutex::new(None);
+    static ref WASM_CONTEXT: WasmContext = {
+        let compiler = Cranelift::new();
+        let engine: wasmer::Engine = compiler.into();
+        // Clone the engine to use it for Store creation
+        let store = Store::new(engine.clone());
+        let module = Module::from_binary(&store, XM_WASM)
+            .expect("Failed to load embedded WASM module");
+        WasmContext { engine, module }
+    };
 }
 
 /// Native target implementation using wasmer runtime
 #[cfg(not(target_arch = "wasm32"))]
 fn decrypt_chunk_native(decrypted_str: &str, track_id: &str) -> Result<String> {
     // Initialize WASM runtime for XM algorithm
-    let compiler = Cranelift::new();
-    let mut store = Store::new(compiler);
-    
-    // Use cached module if available
-    let module = {
-        let mut cache = WASM_MODULE.lock().map_err(|e| XmError::WasmError(format!("Failed to acquire lock: {}", e)))?;
-        if cache.is_none() {
-            let m = Module::from_binary(&store, XM_WASM)
-                .map_err(|e| XmError::WasmError(format!("Failed to load WASM module: {}", e)))?;
-            *cache = Some(m);
-        }
-        cache.as_ref().unwrap().clone()
-    };
+    // Use global context to reuse Engine and Module
+    // This avoids recompilation and ensures Module compatibility with the Store
+    let ctx = &*WASM_CONTEXT;
+    let mut store = Store::new(ctx.engine.clone());
     
     let import_object = imports! {};
-    let instance = Instance::new(&mut store, &module, &import_object)
+    let instance = Instance::new(&mut store, &ctx.module, &import_object)
         .map_err(|e| XmError::WasmError(format!("Failed to instantiate WASM: {}", e)))?;
 
     // Call WASM functions to process decrypted data
