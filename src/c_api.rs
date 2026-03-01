@@ -10,10 +10,15 @@ use crate::plugin::{XmFormatPlugin, PluginConfig};
 // Global plugin instance
 lazy_static! {
     static ref PLUGIN: Arc<Mutex<Option<XmFormatPlugin>>> = Arc::new(Mutex::new(None));
+    static ref INIT_COUNT: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
 }
 
 /// Initialize the plugin
 fn initialize(params: Value) -> Result<Value, String> {
+    let mut count = INIT_COUNT.lock().map_err(|e| format!("Failed to acquire lock: {}", e))?;
+    *count += 1;
+    println!("[xm-format] Initialize called. Count: {}", *count);
+
     let config_json = params.get("config").unwrap_or(&serde_json::json!({})).clone();
     
     // Parse configuration
@@ -196,6 +201,16 @@ fn decrypt_chunk(params: Value) -> Result<Value, String> {
     }
 }
 
+/// Garbage collect
+fn garbage_collect(_params: Value) -> Result<Value, String> {
+    // We can't explicitly GC Wasmer's engine here easily without exposing it,
+    // but we can log status.
+    // If we had access to the Store, we could call store.gc().
+    // For now, just log that GC was requested.
+    println!("[xm-format] Garbage collect requested");
+    Ok(serde_json::json!({"status": "ok"}))
+}
+
 /// Main entry point for plugin invocation
 ///
 /// # Safety
@@ -229,10 +244,11 @@ pub unsafe extern "C" fn plugin_invoke(
     };
     
     // Dispatch method call
-    println!("[xm-format] Invoking method: {}", method_str);
+    // println!("[xm-format] Invoking method: {}", method_str); // Commented out to reduce noise
     let result = match method_str {
         "initialize" => initialize(params_json),
         "shutdown" => shutdown(params_json),
+        "garbage_collect" => garbage_collect(params_json),
         "detect" => detect(params_json),
         "decrypt" => decrypt(params_json),
         "extract_metadata" => extract_metadata(params_json),
