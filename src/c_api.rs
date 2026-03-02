@@ -4,6 +4,8 @@ use std::sync::{Arc, Mutex};
 use lazy_static::lazy_static;
 use serde_json::Value;
 use base64::Engine;
+#[cfg(target_os = "linux")]
+use libc;
 
 use crate::plugin::{XmFormatPlugin, PluginConfig};
 
@@ -13,8 +15,24 @@ lazy_static! {
     static ref INIT_COUNT: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
 }
 
+// Memory tracking helper
+fn log_memory_usage(tag: &str) {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(contents) = std::fs::read_to_string("/proc/self/statm") {
+            let parts: Vec<&str> = contents.split_whitespace().collect();
+            if parts.len() >= 2 {
+                let rss_pages = parts[1].parse::<usize>().unwrap_or(0);
+                let rss_mb = (rss_pages * 4) / 1024; // Assuming 4KB pages
+                println!("[xm-format] Memory [{}]: RSS={} MB", tag, rss_mb);
+            }
+        }
+    }
+}
+
 /// Initialize the plugin
 fn initialize(params: Value) -> Result<Value, String> {
+    log_memory_usage("pre-init");
     let mut count = INIT_COUNT.lock().map_err(|e| format!("Failed to acquire lock: {}", e))?;
     *count += 1;
     println!("[xm-format] Initialize called. Count: {}", *count);
@@ -31,14 +49,23 @@ fn initialize(params: Value) -> Result<Value, String> {
     let mut instance = PLUGIN.lock().map_err(|e| format!("Failed to acquire lock: {}", e))?;
     *instance = Some(plugin);
     
+    log_memory_usage("post-init");
     Ok(serde_json::json!({"status": "initialized"}))
 }
 
 /// Shutdown the plugin
 fn shutdown(_params: Value) -> Result<Value, String> {
+    log_memory_usage("pre-shutdown");
     let mut instance = PLUGIN.lock().map_err(|e| format!("Failed to acquire lock: {}", e))?;
     *instance = None;
     
+    // Force cleanup
+    #[cfg(target_os = "linux")]
+    unsafe {
+        let _ = libc::malloc_trim(0);
+    }
+    
+    log_memory_usage("post-shutdown");
     Ok(serde_json::json!({"status": "shutdown"}))
 }
 
@@ -203,11 +230,18 @@ fn decrypt_chunk(params: Value) -> Result<Value, String> {
 
 /// Garbage collect
 fn garbage_collect(_params: Value) -> Result<Value, String> {
-    // We can't explicitly GC Wasmer's engine here easily without exposing it,
-    // but we can log status.
-    // If we had access to the Store, we could call store.gc().
-    // For now, just log that GC was requested.
+    log_memory_usage("pre-gc");
     println!("[xm-format] Garbage collect requested");
+    
+    // Explicitly call malloc_trim to release memory back to OS
+    // This is crucial for glibc which tends to hold onto memory
+    #[cfg(target_os = "linux")]
+    unsafe {
+        let ret = libc::malloc_trim(0);
+        println!("[xm-format] malloc_trim(0) returned: {}", ret);
+    }
+    
+    log_memory_usage("post-gc");
     Ok(serde_json::json!({"status": "ok"}))
 }
 

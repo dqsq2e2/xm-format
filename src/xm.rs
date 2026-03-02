@@ -91,12 +91,17 @@ unsafe impl Sync for WasmContext {}
 #[cfg(not(target_arch = "wasm32"))]
 lazy_static! {
     static ref WASM_CONTEXT: WasmContext = {
+        println!("[xm-format] Initializing WASM Context (Compiler: Cranelift)...");
+        let start = std::time::Instant::now();
+        
         let compiler = Cranelift::new();
         let engine: wasmer::Engine = compiler.into();
         // Clone the engine to use it for Store creation
         let store = Store::new(engine.clone());
         let module = Module::from_binary(&store, XM_WASM)
             .expect("Failed to load embedded WASM module");
+            
+        println!("[xm-format] WASM Context initialized in {:?}", start.elapsed());
         WasmContext { engine, module }
     };
 }
