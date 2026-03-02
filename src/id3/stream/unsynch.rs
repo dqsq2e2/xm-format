@@ -39,7 +39,9 @@ where
     pub fn new(reader: R) -> Reader<R> {
         Reader {
             reader,
-            buf: Box::new([0; 8192]),
+            // Use vec! to allocate directly on heap, avoiding stack allocation of large array
+            // which might trigger __rust_probestack calls
+            buf: vec![0; 8192].into_boxed_slice().try_into().unwrap(),
             next: 0,
             available: 0,
             discard_next_null_byte: false,

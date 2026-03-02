@@ -13,6 +13,10 @@ pub use detector::{XmDetector, ValidationResult, CorruptionReport};
 pub use streaming::{StreamingDecryptor, ProgressReporter};
 pub use metadata::{MetadataExtractor, AudioMetadata, AudioFormat};
 
+#[no_mangle]
+#[cfg(all(target_os = "linux", any(target_arch = "x86", target_arch = "x86_64")))]
+pub extern "C" fn __rust_probestack() {}
+
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Debug, thiserror::Error)]
