@@ -89,21 +89,21 @@ unsafe impl Send for WasmContext {}
 unsafe impl Sync for WasmContext {}
 
 #[cfg(not(target_arch = "wasm32"))]
+use std::sync::Mutex;
+
+#[cfg(not(target_arch = "wasm32"))]
 lazy_static! {
-    static ref WASM_CONTEXT: WasmContext = {
-        println!("[xm-format] Initializing WASM Context (Compiler: Cranelift)...");
-        let start = std::time::Instant::now();
-        
-        let compiler = Cranelift::new();
-        let engine: wasmer::Engine = compiler.into();
-        // Clone the engine to use it for Store creation
-        let store = Store::new(engine.clone());
-        let module = Module::from_binary(&store, XM_WASM)
-            .expect("Failed to load embedded WASM module");
-            
-        println!("[xm-format] WASM Context initialized in {:?}", start.elapsed());
-        WasmContext { engine, module }
-    };
+    // Wrap WasmContext in Mutex<Option> to allow explicit cleanup
+    static ref WASM_CONTEXT: Mutex<Option<WasmContext>> = Mutex::new(None);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn reset_wasm_context() {
+    let mut guard = WASM_CONTEXT.lock().unwrap();
+    if guard.is_some() {
+        println!("[xm-format] Resetting WASM context (releasing memory)");
+        *guard = None;
+    }
 }
 
 /// Native target implementation using wasmer runtime
@@ -112,11 +112,36 @@ fn decrypt_chunk_native(decrypted_str: &str, track_id: &str) -> Result<String> {
     // Initialize WASM runtime for XM algorithm
     // Use global context to reuse Engine and Module
     // This avoids recompilation and ensures Module compatibility with the Store
-    let ctx = &*WASM_CONTEXT;
-    let mut store = Store::new(ctx.engine.clone());
+    
+    // 1. Get or initialize context
+    let (engine, module) = {
+        let mut guard = WASM_CONTEXT.lock().unwrap();
+        if guard.is_none() {
+            println!("[xm-format] Initializing WASM Context (Compiler: Cranelift)...");
+            let start = std::time::Instant::now();
+            
+            let compiler = Cranelift::new();
+            let engine: wasmer::Engine = compiler.into();
+            // Clone the engine to use it for Store creation
+            let store = Store::new(engine.clone());
+            let module = Module::from_binary(&store, XM_WASM)
+                .expect("Failed to load embedded WASM module");
+                
+            println!("[xm-format] WASM Context initialized in {:?}", start.elapsed());
+            *guard = Some(WasmContext { engine, module });
+        }
+        
+        let ctx = guard.as_ref().unwrap();
+        (ctx.engine.clone(), ctx.module.clone())
+    };
+
+    // 2. Create Store with cloned Engine
+    let mut store = Store::new(engine);
     
     let import_object = imports! {};
-    let instance = Instance::new(&mut store, &ctx.module, &import_object)
+    // Note: Module is bound to the Engine, so we can use it with a new Store 
+    // as long as the Store uses the same Engine.
+    let instance = Instance::new(&mut store, &module, &import_object)
         .map_err(|e| XmError::WasmError(format!("Failed to instantiate WASM: {}", e)))?;
 
     // Call WASM functions to process decrypted data

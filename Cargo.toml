@@ -1,6 +1,6 @@
 [package]
 name = "xm-format"
-version = "1.0.16"
+version = "1.0.17"
 edition = "2021"
 
 [lib]
@@ -40,7 +40,7 @@ wasm-bindgen = "0.2"
 # Note: wasmer is NOT included for wasm32 targets - we use pure Rust implementation
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-wasmer = { version = "4.1", default-features = false, features = ["sys-default"] }
+wasmer = { version = "4.1", default-features = false, features = ["sys"] }
 wasmer-compiler-cranelift = "4.1"
 
 [dev-dependencies]
@@ -48,6 +48,6 @@ proptest = "1.4"
 
 [profile.release]
 opt-level = "z"
-lto = "thin"
-strip = "debuginfo"
+lto = true
+strip = true
 codegen-units = 1

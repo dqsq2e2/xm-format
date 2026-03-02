@@ -233,6 +233,10 @@ fn garbage_collect(_params: Value) -> Result<Value, String> {
     log_memory_usage("pre-gc");
     println!("[xm-format] Garbage collect requested");
     
+    // Reset WASM context to release 20MB+ memory
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::xm::reset_wasm_context();
+    
     // Explicitly call malloc_trim to release memory back to OS
     // This is crucial for glibc which tends to hold onto memory
     #[cfg(target_os = "linux")]
