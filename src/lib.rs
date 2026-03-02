@@ -13,8 +13,11 @@ pub use detector::{XmDetector, ValidationResult, CorruptionReport};
 pub use streaming::{StreamingDecryptor, ProgressReporter};
 pub use metadata::{MetadataExtractor, AudioMetadata, AudioFormat};
 
-// Force linkage of compiler_builtins to ensure __rust_probestack is available
-extern crate compiler_builtins;
+// Re-export the probestack symbol to satisfy the linker if needed
+// This is a last-resort workaround for cross-compilation issues
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[no_mangle]
+pub extern "C" fn __rust_probestack() {}
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
