@@ -26,7 +26,7 @@ where
     R: io::Read,
 {
     reader: R,
-    buf: [u8; 8192],
+    buf: Box<[u8; 8192]>,
     next: usize,
     available: usize,
     discard_next_null_byte: bool,
@@ -39,7 +39,7 @@ where
     pub fn new(reader: R) -> Reader<R> {
         Reader {
             reader,
-            buf: [0; 8192],
+            buf: Box::new([0; 8192]),
             next: 0,
             available: 0,
             discard_next_null_byte: false,
@@ -57,7 +57,7 @@ where
         while i < buf.len() {
             assert!(self.next <= self.available);
             if self.next == self.available {
-                self.available = self.reader.read(&mut self.buf)?;
+                self.available = self.reader.read(&mut self.buf[..])?;
                 self.next = 0;
                 if self.available == 0 {
                     break;
