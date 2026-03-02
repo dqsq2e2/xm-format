@@ -13,6 +13,9 @@ pub use detector::{XmDetector, ValidationResult, CorruptionReport};
 pub use streaming::{StreamingDecryptor, ProgressReporter};
 pub use metadata::{MetadataExtractor, AudioMetadata, AudioFormat};
 
+// Force linkage of compiler_builtins to ensure __rust_probestack is available
+extern crate compiler_builtins;
+
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Debug, thiserror::Error)]
