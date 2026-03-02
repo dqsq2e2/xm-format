@@ -109,9 +109,11 @@ lazy_static! {
 /// Native target implementation using wasmer runtime
 #[cfg(not(target_arch = "wasm32"))]
 fn decrypt_chunk_native(decrypted_str: &str, track_id: &str) -> Result<String> {
+    // Prevent stack probe insertion by allocating large buffers on heap immediately
+    // LLVM inserts __rust_probestack when stack allocation > 4KB
+    
     // Initialize WASM runtime for XM algorithm
     // Use global context to reuse Engine and Module
-    // This avoids recompilation and ensures Module compatibility with the Store
     let ctx = &*WASM_CONTEXT;
     let mut store = Store::new(ctx.engine.clone());
     
@@ -168,21 +170,28 @@ fn decrypt_chunk_native(decrypted_str: &str, track_id: &str) -> Result<String> {
 
     // Read result from WASM memory
     let view = memory_i.view(&store);
-    let mut buf = [0; 4];
+    // Use Box to allocate on heap instead of stack to avoid stack probes
+    let mut buf = Box::new([0u8; 4]); 
     view.read(
         stack_pointer.i32().ok_or_else(|| XmError::WasmError("stack_pointer is None".into()))? as u64,
-        &mut buf,
+        &mut *buf,
     ).map_err(|e| XmError::WasmError(format!("Failed to read result pointer: {}", e)))?;
-    let result_pointer = i32::from_le_bytes(buf);
+    let result_pointer = i32::from_le_bytes(*buf);
     
     view.read(
         stack_pointer.i32().ok_or_else(|| XmError::WasmError("stack_pointer is None".into()))? as u64 + 4,
-        &mut buf,
+        &mut *buf,
     ).map_err(|e| XmError::WasmError(format!("Failed to read result length: {}", e)))?;
-    let result_length = i32::from_le_bytes(buf);
+    let result_length = i32::from_le_bytes(*buf);
 
     let mem = view.copy_to_vec()
         .map_err(|e| XmError::WasmError(format!("Failed to copy memory: {}", e)))?;
+    
+    // Safety check for bounds
+    if result_pointer < 0 || result_length < 0 || (result_pointer as usize + result_length as usize) > mem.len() {
+         return Err(XmError::WasmError("Invalid result pointer or length from WASM".into()).into());
+    }
+
     let result_data =
         &mem[result_pointer as usize..result_pointer as usize + result_length as usize];
     let result_data = String::from_utf8(result_data.to_vec())
