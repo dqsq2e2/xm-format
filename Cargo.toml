@@ -1,6 +1,6 @@
 [package]
 name = "xm-format"
-version = "1.0.8"
+version = "1.0.9"
 edition = "2021"
 
 [lib]
@@ -49,6 +49,6 @@ proptest = "1.4"
 [profile.release]
 opt-level = "z"
 lto = "thin"
-strip = true
+strip = false
 codegen-units = 1
 panic = "abort"
