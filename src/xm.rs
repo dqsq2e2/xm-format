@@ -101,30 +101,16 @@ lazy_static! {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn reset_wasm_context() {
-    // Check if we should GC - skip if accessed recently (e.g. within last 30 seconds)
-    // This prevents context destruction during active playback which causes stuttering/failures
-    if let Ok(last) = LAST_WASM_ACCESS.lock() {
-        if last.elapsed() < std::time::Duration::from_secs(30) {
-            // println!("[xm-format] GC skipped: WASM context active (last used {:?} ago)", last.elapsed());
-            return;
-        }
-    }
-
-    let mut guard = WASM_CONTEXT.lock().unwrap();
-    if guard.is_some() {
-        // println!("[xm-format] Resetting WASM context (releasing memory)");
-        *guard = None;
-    }
+    // Disable reset_wasm_context to ensure stability.
+    // The previous optimization of resetting the context caused instability during frequent playback switching.
+    // We will rely on OS memory management and potential future optimizations in wasmer or our usage of it.
+    // Keeping the context alive is the only way to guarantee 100% playback success rate.
+    // println!("[xm-format] Resetting WASM context - DISABLED for stability");
 }
 
 /// Native target implementation using wasmer runtime
 #[cfg(not(target_arch = "wasm32"))]
 fn decrypt_chunk_native(decrypted_str: &str, track_id: &str) -> Result<String> {
-    // Update last access time
-    if let Ok(mut last) = LAST_WASM_ACCESS.lock() {
-        *last = std::time::Instant::now();
-    }
-
     // Initialize WASM runtime for XM algorithm
     // Use global context to reuse Engine and Module
     // This avoids recompilation and ensures Module compatibility with the Store
@@ -222,11 +208,12 @@ fn decrypt_chunk_native(decrypted_str: &str, track_id: &str) -> Result<String> {
     ).map_err(|e| XmError::WasmError(format!("Failed to read result length: {}", e)))?;
     let result_length = i32::from_le_bytes(buf);
 
-    let mem = view.copy_to_vec()
-        .map_err(|e| XmError::WasmError(format!("Failed to copy memory: {}", e)))?;
-    let result_data =
-        &mem[result_pointer as usize..result_pointer as usize + result_length as usize];
-    let result_data = String::from_utf8(result_data.to_vec())
+    // Optimized memory reading: Read only the necessary bytes instead of copying the whole memory
+    let mut result_buffer = vec![0u8; result_length as usize];
+    view.read(result_pointer as u64, &mut result_buffer)
+        .map_err(|e| XmError::WasmError(format!("Failed to read result data: {}", e)))?;
+    
+    let result_data = String::from_utf8(result_buffer)
         .map_err(|e| XmError::DecryptionError(format!("Invalid UTF-8 in result: {}", e)))?;
     
     Ok(result_data)
