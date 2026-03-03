@@ -17,6 +17,7 @@ lazy_static! {
 
 // Memory tracking helper
 fn log_memory_usage(tag: &str) {
+    let _ = tag; // Suppress unused variable warning on non-Linux platforms
     #[cfg(target_os = "linux")]
     {
         if let Ok(contents) = std::fs::read_to_string("/proc/self/statm") {

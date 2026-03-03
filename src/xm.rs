@@ -95,13 +95,24 @@ use std::sync::Mutex;
 lazy_static! {
     // Wrap WasmContext in Mutex<Option> to allow explicit cleanup
     static ref WASM_CONTEXT: Mutex<Option<WasmContext>> = Mutex::new(None);
+    // Track last access time to prevent GC during active playback
+    static ref LAST_WASM_ACCESS: Mutex<std::time::Instant> = Mutex::new(std::time::Instant::now());
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn reset_wasm_context() {
+    // Check if we should GC - skip if accessed recently (e.g. within last 30 seconds)
+    // This prevents context destruction during active playback which causes stuttering/failures
+    if let Ok(last) = LAST_WASM_ACCESS.lock() {
+        if last.elapsed() < std::time::Duration::from_secs(30) {
+            // println!("[xm-format] GC skipped: WASM context active (last used {:?} ago)", last.elapsed());
+            return;
+        }
+    }
+
     let mut guard = WASM_CONTEXT.lock().unwrap();
     if guard.is_some() {
-        println!("[xm-format] Resetting WASM context (releasing memory)");
+        // println!("[xm-format] Resetting WASM context (releasing memory)");
         *guard = None;
     }
 }
@@ -109,6 +120,11 @@ pub fn reset_wasm_context() {
 /// Native target implementation using wasmer runtime
 #[cfg(not(target_arch = "wasm32"))]
 fn decrypt_chunk_native(decrypted_str: &str, track_id: &str) -> Result<String> {
+    // Update last access time
+    if let Ok(mut last) = LAST_WASM_ACCESS.lock() {
+        *last = std::time::Instant::now();
+    }
+
     // Initialize WASM runtime for XM algorithm
     // Use global context to reuse Engine and Module
     // This avoids recompilation and ensures Module compatibility with the Store
