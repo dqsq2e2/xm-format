@@ -1,5 +1,6 @@
 {
-  "name": "xm-format",
+  "id": "xm-format",
+  "name": "xm format",
   "version": "1.0.0",
   "plugin_type": "format",
   "supported_extensions": ["xm"],
