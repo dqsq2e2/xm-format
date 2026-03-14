@@ -136,6 +136,25 @@ fn extract_metadata(params: Value) -> Result<Value, String> {
     }
 }
 
+/// Write metadata
+fn write_metadata(params: Value) -> Result<Value, String> {
+    let file_path_str = params["file_path"]
+        .as_str()
+        .ok_or("Missing 'file_path' parameter")?;
+        
+    let file_path = std::path::Path::new(file_path_str);
+    
+    let instance = PLUGIN.lock().map_err(|e| format!("Failed to acquire lock: {}", e))?;
+    if let Some(plugin) = instance.as_ref() {
+        plugin.write_metadata(file_path, &params)
+            .map_err(|e| e.to_string())?;
+            
+        Ok(serde_json::json!({"status": "success"}))
+    } else {
+        Err("Plugin not initialized".to_string())
+    }
+}
+
 /// Extract ID3 metadata (for scraper)
 fn extract_id3_metadata(params: Value) -> Result<Value, String> {
     let file_path_str = params["file_path"]
@@ -291,6 +310,7 @@ pub unsafe extern "C" fn plugin_invoke(
         "detect" => detect(params_json),
         "decrypt" => decrypt(params_json),
         "extract_metadata" => extract_metadata(params_json),
+        "write_metadata" => write_metadata(params_json),
         "extract_id3_metadata" => extract_id3_metadata(params_json),
         "get_metadata_read_size" => get_metadata_read_size(params_json),
         "get_decryption_plan" => get_decryption_plan(params_json),

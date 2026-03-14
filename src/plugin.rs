@@ -149,6 +149,69 @@ impl XmFormatPlugin {
         crate::xm::extract_xm_info(file)
     }
 
+    /// Write metadata to XM file
+    pub fn write_metadata(&self, file_path: &Path, params: &serde_json::Value) -> Result<()> {
+        use crate::id3::{Tag, TagLike, Version};
+        use crate::id3::frame::{Content, Frame, Picture, PictureType, Comment};
+
+        // Try to read existing tag, or create new (though creating new for XM might break decryption if not careful)
+        let mut tag = match Tag::read_from_path(file_path) {
+            Ok(t) => t,
+            Err(_) => return Err(XmError::InvalidFormat("Failed to read existing tags".into()).into()),
+        };
+        
+        if let Some(title) = params.get("title").and_then(|v| v.as_str()) {
+            tag.set_title(title);
+        }
+        if let Some(artist) = params.get("artist").and_then(|v| v.as_str()) {
+            tag.set_artist(artist);
+        }
+        if let Some(album) = params.get("album").and_then(|v| v.as_str()) {
+            tag.set_album(album);
+        }
+        if let Some(genre) = params.get("genre").and_then(|v| v.as_str()) {
+            tag.set_genre(genre);
+        }
+        if let Some(description) = params.get("description").and_then(|v| v.as_str()) {
+            // Manually handle comments as they are multi-frame capable
+            // Remove existing COMM frames to avoid duplication
+            tag.remove("COMM");
+            tag.add_frame(Frame::with_content("COMM", Content::Comment(Comment {
+                lang: "eng".to_string(),
+                description: "".to_string(),
+                text: description.to_string(),
+            })));
+        }
+        
+        // Cover Art
+        if let Some(cover_path_str) = params.get("cover_path").and_then(|v| v.as_str()) {
+            let cover_path = Path::new(cover_path_str);
+            if cover_path.exists() {
+                if let Ok(data) = std::fs::read(cover_path) {
+                     let mime_type = if cover_path.extension().map_or(false, |e| e.eq_ignore_ascii_case("png")) {
+                         "image/png".to_string()
+                     } else {
+                         "image/jpeg".to_string()
+                     };
+                     
+                     // Remove existing pictures
+                     tag.remove("APIC");
+                     
+                     tag.add_frame(Frame::with_content("APIC", Content::Picture(Picture {
+                         mime_type,
+                         picture_type: PictureType::CoverFront,
+                         description: "Cover".to_string(),
+                         data,
+                     })));
+                }
+            }
+        }
+
+        // Write back using ID3v2.3 for compatibility
+        tag.write_to_path(file_path, Version::Id3v23)?;
+        Ok(())
+    }
+
     /// Get required read size for metadata extraction
     pub fn get_metadata_read_size(&self, header_probe: &[u8]) -> Option<usize> {
         MetadataExtractor::get_id3_size(header_probe)
